@@ -1,0 +1,123 @@
+---
+
+- hosts: all
+  gather_facts: false
+  tasks:
+    - name: See which servers are unreachable
+      command: echo 1
+      register: error
+      ignore_errors: true
+
+- hosts: all
+  tasks:
+    - block:
+      - name: Is server up
+        register: error
+        action: ping
+      rescue:
+        - include_role:
+            name: mail
+          vars:
+            body: |-
+              Host: {{ inventory_hostname }}
+              Server doesn't repond to ping
+              Message: {{ error.msg }}
+
+    - name: Check if a reboot is needed
+      register: reboot_required_file
+      stat: path=/var/run/reboot-required get_md5=no
+
+    - name: Read file containing packages which need a reboot
+      slurp:
+        src: /var/run/reboot-required.pkgs
+      register: reboot_required_pkgs
+      when: reboot_required_file.stat.exists
+
+    - name: Mail if reboot is required
+      include_role:
+        name: mail
+      vars:
+        body: |-
+          Host: {{ inventory_hostname }}
+          Message: Reboot needed
+          {{ reboot_required_pkgs["content"] | b64decode }}
+      when: reboot_required_file.stat.exists
+
+- hosts: webservers
+  tasks:
+    - block:
+      - name: Netcat sees the server
+        command: nc -zw1 "{{ inventory_hostname }}" 443
+        delegate_to: 127.0.0.1
+        register: error
+      rescue:
+        - name: Mail
+          include_role:
+            name: mail
+          vars:
+            body: |-
+              Host: {{ inventory_hostname }}
+              Netcat doesn't see anything listening on port 443
+              Message: {{ error.msg }}
+
+- hosts: nginx
+  tasks:
+    - block:
+      - name: nginx is up
+        command: systemctl status nginx
+        register: error
+      rescue:
+        - name: Mail
+          include_role:
+            name: mail
+          vars:
+            body: |-
+              Host: {{ inventory_hostname }}
+              Nginx isn't running
+              Message: {{ error.msg }}
+
+- hosts: apache
+  tasks:
+    - block:
+      - name: apache is up
+        command: systemctl status apache2
+        register: error
+      rescue:
+        - name: Mail
+          include_role:
+            name: mail
+          vars:
+            body: |-
+              Host: {{ inventory_hostname }}
+              Apache isn't running
+              Message: {{ error.msg }}
+
+- hosts: databases
+  tasks:
+    - block:
+      - name: postgresql up
+        command: systemctl status postgresql
+        register: error
+      rescue:
+        - name: Mail
+          include_role:
+            name: mail
+          vars:
+            body: |-
+              Host: {{ inventory_hostname }}
+              Postgresql isn't running
+              Message: {{ error.msg }}
+
+# Email about unreachable server.
+- hosts: localhost
+  tasks:
+  - meta: clear_host_errors
+  - include_role:
+      name: mail
+    vars:
+      body: |-
+        Host: {{ item }}
+        The host is unreachable
+        Message: {{ hostvars[item].error.msg }}
+    with_items: "{{ groups['all'] }}"
+    when: hostvars[item].error.unreachable is defined

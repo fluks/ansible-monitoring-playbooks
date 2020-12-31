@@ -1,0 +1,12 @@
+---
+
+- name: Email
+  mail:
+    host: <smtp host>
+    port: <port>
+    username: <username>
+    password: '<password>'
+    to: <to address>
+    subject: Ansible - failure detected
+    body: '{{ body }}'
+  delegate_to: localhost
